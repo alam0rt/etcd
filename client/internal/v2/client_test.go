@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -814,6 +815,63 @@ func TestHTTPClusterClientSync(t *testing.T) {
 	sort.Strings(got)
 	if !reflect.DeepEqual(want, got) {
 		t.Fatalf("incorrect endpoints post-Sync: want=%#v got=%#v", want, got)
+	}
+
+	err = hc.SetEndpoints([]string{"http://127.0.0.1:4009"})
+	if err != nil {
+		t.Fatalf("unexpected error during reset: %#v", err)
+	}
+
+	want = []string{"http://127.0.0.1:4009"}
+	got = hc.Endpoints()
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("incorrect endpoints post-reset: want=%#v got=%#v", want, got)
+	}
+}
+
+func TestHTTPClusterClientSyncWithPriority(t *testing.T) {
+	err := os.Setenv("ETCD_PRIORITISE_HOSTS", "127.0.0.1:4001")
+	if err != nil {
+		t.Fatalf("unexpected error during setup: %#v", err)
+	}
+
+	cf := newStaticHTTPClientFactory([]staticHTTPResponse{
+		{
+			resp: http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}},
+			body: []byte(`{"members":[{"id":"2745e2525fce8fe","peerURLs":["http://127.0.0.1:7003"],"name":"node3","clientURLs":["http://127.0.0.1:4003"]},{"id":"42134f434382925","peerURLs":["http://127.0.0.1:2380","http://127.0.0.1:7001"],"name":"node1","clientURLs":["http://127.0.0.1:2379","http://127.0.0.1:4001"]},{"id":"94088180e21eb87b","peerURLs":["http://127.0.0.1:7002"],"name":"node2","clientURLs":["http://127.0.0.1:4002"]}]}`),
+		},
+	})
+
+	hc := &httpClusterClient{
+		clientFactory: cf,
+		rand:          rand.New(rand.NewSource(0)),
+	}
+	err = hc.SetEndpoints([]string{"http://127.0.0.1:2379"})
+	if err != nil {
+		t.Fatalf("unexpected error during setup: %#v", err)
+	}
+
+	want := []string{"http://127.0.0.1:2379"}
+	got := hc.Endpoints()
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("incorrect endpoints: want=%#v got=%#v", want, got)
+	}
+
+	err = hc.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error during Sync: %#v", err)
+	}
+
+	want = []string{"http://127.0.0.1:2379", "http://127.0.0.1:4001", "http://127.0.0.1:4002", "http://127.0.0.1:4003"}
+	got = hc.Endpoints()
+	sort.Strings(got)
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("incorrect endpoints post-Sync: want=%#v got=%#v", want, got)
+	}
+
+	wantPin := 1
+	if wantPin != hc.pinned {
+		t.Fatalf("incorrect endpoint pinned post-Sync: want=%#v got=%#v", wantPin, hc.pinned)
 	}
 
 	err = hc.SetEndpoints([]string{"http://127.0.0.1:4009"})

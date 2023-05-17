@@ -24,8 +24,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -442,7 +444,19 @@ func (c *httpClusterClient) Sync(ctx context.Context) error {
 			return nil
 		}
 		// When items in the endpoint list changes, we choose a new pin
+		// and try to pick an etcd member we have prioritised.
 		neps = shuffleEndpoints(c.rand, neps)
+		prioritiseEnv := os.Getenv("ETCD_PRIORITISE_HOSTS")
+		if len(prioritiseEnv) != 0 {
+			prioritise := strings.Split(prioritiseEnv, ",")
+			want := prioritise[rand.Intn(len(prioritise))]
+			for i, n := range neps {
+				if n.Host == want {
+					npin = i
+					break
+				}
+			}
+		}
 	case EndpointSelectionPrioritizeLeader:
 		nle, err := c.getLeaderEndpoint(ctx, neps)
 		if err != nil {
